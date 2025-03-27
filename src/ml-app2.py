@@ -44,7 +44,7 @@ import catboost
 from catboost import CatBoostClassifier, Pool
 
 #XGBoost
-from xgboost import XGBClassifier
+from xgboost import XGBClassifier, XGBRegressor, plot_importance
 
 #LightGBM
 from lightgbm import LGBMClassifier
@@ -68,6 +68,9 @@ from sklearn.neighbors import KNeighborsClassifier
 #analysis
 from scipy.stats import chi2_contingency, f_oneway, ttest_ind
 from sklearn.feature_selection import mutual_info_classif
+
+#for plotting feature importance
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 
 
 class MLApp(QWidget):
@@ -103,8 +106,10 @@ class MLApp(QWidget):
         layout.addWidget(self.label)
         
         self.model_selection = QComboBox()
-        self.model_selection.addItems(['Linear Regression', 'LR(perceptron-trick)', 'Logistic Regression(Binary Classification)', 'Logistic Regression(Multi-Class Classification)', 'SVM(binary classification)', 'Naive Bayes(GaussianNB)', 'Naive Bayes(MultinomialNB)', 'Naive Bayes(BernoulliNB)', 'KNN', 'Decision Tree(C4.5)', 'Decision Tree(ID3)', 'Decision Tree(CART)', 'Random Forest', 'XGBoost', 'catboost', 'LightGBM', 'Neural Network (DL)', 'Gradient Boosting'])
+        self.model_selection.addItems(['Linear Regression', 'LR(perceptron-trick)', 'Logistic Regression(Binary Classification)', 'Logistic Regression(Multi-Class Classification)', 'SVM(binary classification)', 'Naive Bayes(GaussianNB)', 'Naive Bayes(MultinomialNB)', 'Naive Bayes(BernoulliNB)', 'KNN', 'Decision Tree(C4.5)', 'Decision Tree(ID3)', 'Decision Tree(CART)', 'Random Forest', 'XGBoost(Classification)', 'XGBoost(Regression)', 'catboost', 'LightGBM', 'Neural Network (DL)', 'Gradient Boosting'])
         layout.addWidget(self.model_selection)
+        
+        
         
         
         #-----------svm-----------
@@ -162,6 +167,10 @@ class MLApp(QWidget):
         self.train_btn.clicked.connect(self.trainModel)
         layout.addWidget(self.train_btn)
         
+        
+        #for feature importance
+        # self.model_selection.currentTextChanged.connect(self.showFeatureImportance)
+        
         self.output_text = QTextEdit()
         self.output_text.setReadOnly(True)
         layout.addWidget(self.output_text)
@@ -185,8 +194,17 @@ class MLApp(QWidget):
         # Placeholder for the plot
         self.plot_layout = QVBoxLayout()
         layout.addLayout(self.plot_layout)
+        
+        #for feature importance plots 
+        self.figure, self.ax = plt.subplots()
+        self.canvas = FigureCanvas(self.figure)
+        layout.addWidget(self.canvas)
 
         self.setLayout(layout)
+        
+        # self.plot_feature_importance()
+
+        
     
     def loadDataset(self):
         file_path, _ = QFileDialog.getOpenFileName(self, 'Open File', '', 'CSV Files (*.csv)')
@@ -379,8 +397,54 @@ class MLApp(QWidget):
             acc = accuracy_score(y_test, y_pred)
             self.output_text.append(f'LightGBM Accuracy: {acc:.4}')
             
+            #getting feature importance
+            feature_importances = self.model.feature_importances_
+            self.plotFeatureImportance(feature_importances, data.feature_names)
+            
                     
-        elif model_choice == 'XGBoost':
+        elif model_choice == 'XGBoost(Regression)':
+            # le = LabelEncoder()
+            # y_train_encoded = le.fit_transform(y_train)
+            # y_test_encoded = le.transform(y_test)
+            
+            label_encoders = {}
+            for col in X.select_dtypes(include=["object"]).columns:
+                le = LabelEncoder()
+                X_train[col] = le.fit_transform(X_train[col])
+                X_test[col] = le.transform(X_test[col])
+                label_encoders[col] = le
+            # if y_train.dtype == 'float64' or y_train.dtype == 'int64':
+            #     le = LabelEncoder()
+            y_train = y_train.astype(float)
+            y_test = y_test.astype(float)
+            y_train = y_train.fillna(y_train.median())
+            y_test = y_test.fillna(y_test.median())
+            
+            self.model = XGBRegressor(objective = 'reg:squarederror', n_estimators=200, learning_rate=0.1, max_depth=6)
+            self.model.fit(X_train, y_train, eval_set=[(X_train, y_train)])
+            y_pred = self.model.predict(X_test)
+            
+            #regression metrics
+            mse = mean_squared_error(y_test, y_pred)
+            r2 = r2_score(y_test, y_pred)
+            self.output_text.append(f'XGBoost MSE: {mse:.4f}')
+            self.output_text.append(f'XGBoost R2 score:{r2:.4f}')
+            
+            #getting feature importance
+            feature_importances = self.model.feature_importances_
+            self.output_text.append(f"Feature Importances: {feature_importances.tolist()}")
+            # self.(self.model)
+            
+            plt.figure(figsize=(10, 6))
+            plot_importance(self.model)
+            plt.show()
+            
+
+            #self.plotFeatureImportance(feature_importances, self.dataset.feature_names)
+            
+            #self.plotFeatureImportance(feature_importances, self.dataset.columns[:-1])  # Exclude target column
+        
+        elif model_choice == 'XGBoost(Classification)':
             le = LabelEncoder()
             y_train_encoded = le.fit_transform(y_train)
             y_test_encoded = le.transform(y_test)
@@ -389,6 +453,11 @@ class MLApp(QWidget):
             y_pred = self.model.predict(X_test)
             acc = accuracy_score(y_test_encoded, y_pred)
             self.output_text.append(f'XGBoost Accuracy: {acc:.4f}')
+            
+            #getting feature importance
+            feature_importances = self.model.feature_importances_
+            #self.plotFeatureImportance(feature_importances, self.dataset.feature_names)
+            self.plotFeatureImportance(feature_importances, self.dataset.columns[:-1])  # Exclude target column
             
         elif model_choice == 'Gradient Boosting':
             if y.dtype == 'object':
@@ -415,6 +484,10 @@ class MLApp(QWidget):
             y_pred = self.model.predict(X_test)
             acc = accuracy_score(y_test, y_pred)
             self.output_text.append(f'Random Forest Accuracy: {acc:.4f}')
+            
+            #getting feature importance
+            feature_importances = self.model.feature_importances_
+            self.plotFeatureImportance(feature_importances, data.feature_names)
 
         elif model_choice == 'Neural Network (DL)':
             class SimpleNN(nn.Module):
@@ -447,7 +520,59 @@ class MLApp(QWidget):
             
             self.output_text.append('Neural Network trained successfully!')
         
+        
+        
         self.save_btn.setEnabled(True)
+        
+        
+    #def plotFeatureImportance(self, importances, feature_names):
+        # self.ax.clear()
+        # indices = np.argsort(importances)
+        # self.ax.barh(range(len(indices)), importances[indices], align = 'center')
+        # self.ax.set_yticks(range(len(indices)))
+        # self.ax.set_yticklabels(np.array(feature_names)[indices])
+        # self.ax.set_xlabel('Feature Importance Score')
+        # self.ax.set_title('Feature Importance')
+        
+        
+        # if self.canvas is not None:
+        #     layout = self.plot_layout
+        #     layout.removeWidget(self.canvas)
+        #     self.canvas.deleteLater()
+        #     self.canvas = None
+            
+        # self.canvas.draw()
+        
+        
+        """Plot actual vs predicted values inside the PyQt app."""
+        if self.canvas:
+            self.plot_layout.removeWidget(self.canvas)
+            self.canvas.deleteLater()
+            self.canvas = None
+
+        # Create Matplotlib figure
+        # fig, ax = plt.subplots(figsize=(5, 3))
+        # ax.scatter(range(len(y_test)), y_test, color='blue', label='Actual', alpha=0.6)
+        # ax.scatter(range(len(y_pred)), y_pred, color='red', label='Predicted', alpha=0.6)
+        # ax.set_xlabel('Sample Index')
+        # ax.set_ylabel('Class Label')
+        # ax.set_title(title)
+        # ax.legend()
+
+        #     # Embed Matplotlib figure inside PyQt
+        # self.canvas = FigureCanvas(fig)
+        # self.plot_layout.addWidget(self.canvas)
+        # self.canvas.draw()
+        # self.plot_layout.update()
+        
+        # fig = plt.figure(figsize=(10, 6))
+        # plot_importance(self.model)
+        #plt.show()
+        
+    def plot_feature_importance(self):
+        self.ax.clear()  # Clear previous plot
+        plot_importance(self.model, ax=self.ax)  # Plot feature importance
+        self.canvas.draw()  # Refresh canvas
         
     def plotResults(self, y_test, y_pred, title):
         """Plot actual vs predicted values inside the PyQt app."""
@@ -471,6 +596,14 @@ class MLApp(QWidget):
         self.canvas.draw()
         self.plot_layout.update()
         
+        
+    def showFeatureImportance(self):
+        selected_model = self.model_selection.currentText()
+        if selected_model in ['Random Forest', 'XGBoost', 'Decision Trees']:
+            self.output_text.append('Feature Importance:')
+            feature_importance = self.model.feature_importances_
+            for i, col in enumerate(self.dataset.columns[:-1]):
+                self.output_text(f'{col}: {feature_importance[i]}')
     
     def analyzeRelations(self):
         """Analyze column relationships using different tests."""
@@ -520,9 +653,9 @@ class MLApp(QWidget):
                 y = le.fit_transform(y)
 
             mi_scores = mutual_info_classif(X, y)
-            self.output_text.append(f"📊 Mutual Information Scores: {mi_scores}\n")
+            self.output_text.append(f" Mutual Information Scores: {mi_scores}\n")
 
-        self.output_text.append("✅ Relationship Analysis Completed!\n")
+        self.output_text.append("Relationship Analysis Completed!\n")
     
     def saveModel(self):
         # file_path, _ = QFileDialog.getSaveFileName(self, 'Save Model', '', 'Model Files (*.pkl)')
